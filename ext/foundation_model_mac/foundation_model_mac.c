@@ -1,0 +1,18 @@
+#include <ruby.h>
+#include "FoundationModelMac-Swift.h"
+
+static VALUE rb_foundation_model_mac_perform(VALUE self, VALUE input) {
+    const char *c_input = StringValueCStr(input);
+    char *result = foundation_model_mac_perform(c_input);
+    if (result == NULL) {
+        return rb_utf8_str_new_cstr("");
+    }
+    VALUE rb_result = rb_utf8_str_new_cstr(result);
+    foundation_model_mac_free(result);
+    return rb_result;
+}
+
+void Init_foundation_model_mac(void) {
+    VALUE module = rb_define_module("FoundationModelMac");
+    rb_define_singleton_method(module, "perform", rb_foundation_model_mac_perform, 1);
+}
