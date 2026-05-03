@@ -1,9 +1,18 @@
 import Foundation
 
-@c
-public func foundation_model_mac_perform(_ input: UnsafePointer<CChar>) -> UnsafeMutablePointer<CChar> {
-    let s = String(cString: input)
-    let result = foundation_model_mac_perform(s)
+@c @MainActor
+public func foundation_model_mac_generate(
+    _ prompt: UnsafePointer<CChar>,
+    _ instructions: UnsafePointer<CChar>?
+) -> UnsafeMutablePointer<CChar> {
+    let promptStr = String(cString: prompt)
+    let instructionsStr: String?
+    if let instructions = instructions {
+        instructionsStr = String(cString: instructions)
+    } else {
+        instructionsStr = nil
+    }
+    let result = performGenerate(prompt: promptStr, instructions: instructionsStr)
     return strdup(result)!
 }
 
