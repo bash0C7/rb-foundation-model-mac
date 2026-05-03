@@ -4,12 +4,14 @@ require_relative "lib/foundation_model_mac/version"
 
 Gem::Specification.new do |spec|
   spec.name = "rb-foundation-model-mac"
-  spec.version = FoundationModelMac::VERSION
+  spec.version = AppleFoundationModel::VERSION
   spec.authors = ["bash0C7"]
   spec.email = ["ksb.4038.nullpointer+github@gmail.com"]
 
-  spec.summary = "Swift-backed native Ruby extension: rb-foundation-model-mac"
-  spec.description = "rb-foundation-model-mac wraps a Swift implementation as a Ruby native extension via Swift Package Manager and a thin C bridge. Edit this description before publishing."
+  spec.summary = "Pure-Ruby Apple Foundation Models API backed by a local Ollama server"
+  spec.description = "rb-foundation-model-mac provides AppleFoundationModel.generate and Session, " \
+    "backed by a local Ollama server. The public API mirrors the Apple Foundation Models surface " \
+    "so that consumers can switch to the native macOS 26 backend in future without API changes."
   spec.homepage = "https://github.com/bash0C7/rb-foundation-model-mac"
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.2.0"
@@ -27,7 +29,4 @@ Gem::Specification.new do |spec|
   spec.bindir = "exe"
   spec.executables = spec.files.grep(%r{\Aexe/}) { |f| File.basename(f) }
   spec.require_paths = ["lib"]
-  spec.extensions = ["ext/foundation_model_mac/extconf.rb"]
-
-  spec.add_dependency "swift_gem"
 end
