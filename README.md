@@ -4,11 +4,11 @@ On-device LLM inference for Ruby on macOS via the native [Apple Foundation Model
 
 ## Requirements
 
-- macOS 26+ (Tahoe / 後継)
+- macOS 26+ (Tahoe / later)
 - Apple Silicon
-- Apple Intelligence が有効化されてオンデバイスモデルが download 完了済み (Settings → Apple Intelligence & Siri)
+- Apple Intelligence enabled with the on-device model fully downloaded (Settings → Apple Intelligence & Siri)
 - Ruby 3.2+
-- Swift 6.3+ (推奨インストーラ: [`swiftly`](https://www.swift.org/install/macos/))
+- Swift 6.3+ (recommended installer: [`swiftly`](https://www.swift.org/install/macos/))
 
 ## Installation
 
@@ -22,7 +22,7 @@ gem "rb-foundation-model-mac"
 bundle install
 ```
 
-ビルド時に Swift native extension が `swift build` 経由で組まれる。Xcode は不要。
+The Swift native extension is built via `swift build` at install time. Xcode is not required.
 
 ## Usage
 
@@ -61,7 +61,7 @@ session.close
 
 ## Examples
 
-`examples/` ディレクトリに実行可能なサンプルコードが含まれています。
+The `examples/` directory contains runnable sample code.
 
 ### English Examples
 
@@ -101,15 +101,15 @@ bundle exec ruby examples/japanese_streaming.rb "あなたの質問"
 
 ## Errors
 
-- `AppleFoundationModel::UnavailableError` — Apple Intelligence が利用できない（macOS バージョン不足、ハードウェア未対応、ユーザーが未有効化、モデル未 download など）。`Session.new` 時に reason を含めて raise。
-- `AppleFoundationModel::GenerationError` — Apple FM の推論中エラー（context overflow / guardrail violation など）。
-- `AppleFoundationModel::Error` — 上記の親、および closed Session への操作などその他の Ruby 側エラー。
+- `AppleFoundationModel::UnavailableError` — Apple Intelligence is not available (unsupported macOS version, unsupported hardware, user has not enabled it, model not yet downloaded, etc.). Raised from `Session.new` with the reason included.
+- `AppleFoundationModel::GenerationError` — error during Apple FM inference (context overflow, guardrail violation, etc.).
+- `AppleFoundationModel::Error` — parent of the above, plus other Ruby-side errors such as operating on a closed Session.
 
 ## Roadmap
 
-- Embeddings API（`rb-apple-sdk-knowledge` で消費）
+- Embeddings API (consumed by `rb-apple-sdk-knowledge`)
 - Tool / function calling
-- Cancellation サポート（現在は Apple FM Task のキャンセル経路を Ruby に橋渡ししていない）
+- Cancellation support (the Apple FM Task cancellation path is not currently bridged to Ruby)
 
 ## License
 
