@@ -533,19 +533,19 @@ end
 - `lib/foundation_model_mac.rb`
 - `rb-foundation-model-mac.gemspec`
 - `Rakefile`
-- `.gitignore`
 - `README.md`
-- `examples/*.rb`
 - `test/test_helper.rb`
 - `test/test_generate.rb`
 - `test/test_session.rb`
 - `test/test_streaming.rb`
 
-### 不変
+### 不変（既に Apple FM 移行に支障なし）
 - `Gemfile`
 - `lib/foundation_model_mac/version.rb`
 - `LICENSE.txt`
 - `.swift-version`
+- `.gitignore`（必要な build artifacts ignore は登録済み）
+- `examples/*.rb`（既に ENV / Ollama 言及なし、API 維持により無変更）
 - `.bundle/` / `vendor/bundle/`
 
 ## 重要な技術的注意
