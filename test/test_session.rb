@@ -3,7 +3,8 @@ require "test_helper"
 
 class TestSession < Test::Unit::TestCase
   def setup
-    omit "Ollama not running" unless ollama_running?
+    omit "Apple Intelligence unavailable: #{apple_foundation_model_unavailable_reason}" \
+      unless apple_foundation_model_available?
   end
 
   def test_session_with_instructions_responds

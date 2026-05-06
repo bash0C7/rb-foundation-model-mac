@@ -3,7 +3,8 @@ require "test_helper"
 
 class TestGenerate < Test::Unit::TestCase
   def setup
-    omit "Ollama not running on #{ENV.fetch('OLLAMA_HOST', 'http://localhost:11434')}" unless ollama_running?
+    omit "Apple Intelligence unavailable: #{apple_foundation_model_unavailable_reason}" \
+      unless apple_foundation_model_available?
   end
 
   def test_generate_returns_non_empty_string
@@ -16,15 +17,6 @@ class TestGenerate < Test::Unit::TestCase
     response = AppleFoundationModel.generate(
       prompt: "What color is grass?",
       instructions: "Reply with exactly one word, lowercase, no punctuation."
-    )
-    assert_kind_of String, response
-    assert response.length > 0
-  end
-
-  def test_generate_uses_configured_model
-    response = AppleFoundationModel.generate(
-      prompt: "Hi",
-      model: ENV.fetch("OLLAMA_MODEL", "gemma4:e2b")
     )
     assert_kind_of String, response
     assert response.length > 0

@@ -1,4 +1,5 @@
 #include <ruby.h>
+#include <ruby/thread.h>
 #include <stdlib.h>
 #include "FoundationModelMac-Swift.h"
 
@@ -9,7 +10,7 @@ static void fmm_dfree(void *p) {
 }
 
 static const rb_data_type_t fmm_dt = {
-    "AppleFoundationModel::Session::Native",
+    "AppleFoundationModel::Native",
     { NULL, fmm_dfree, NULL, },
     NULL, NULL, RUBY_TYPED_FREE_IMMEDIATELY,
 };
@@ -41,33 +42,66 @@ static VALUE rb_fmm_init(int argc, VALUE *argv, VALUE self) {
     return self;
 }
 
+struct respond_args {
+    void *p;
+    const char *prompt;
+    char *result;
+    char *err;
+};
+
+static void *respond_no_gvl(void *data) {
+    struct respond_args *a = (struct respond_args *)data;
+    a->result = fmm_session_respond(a->p, a->prompt, &a->err);
+    return NULL;
+}
+
 static VALUE rb_fmm_respond(VALUE self, VALUE prompt) {
-    void *p = DATA_PTR(self);
-    char *err = NULL;
-    char *res = fmm_session_respond(p, StringValueCStr(prompt), &err);
-    if (err) {
-        VALUE m = rb_utf8_str_new_cstr(err);
-        free(err);
+    struct respond_args a = { DATA_PTR(self), StringValueCStr(prompt), NULL, NULL };
+    rb_thread_call_without_gvl(respond_no_gvl, &a, RUBY_UBF_IO, NULL);
+    if (a.err) {
+        VALUE m = rb_utf8_str_new_cstr(a.err);
+        free(a.err);
         rb_raise(eGen, "%s", StringValueCStr(m));
     }
-    VALUE r = rb_utf8_str_new_cstr(res);
-    free(res);
+    VALUE r = rb_utf8_str_new_cstr(a.result);
+    free(a.result);
     return r;
 }
 
-static void stream_cb(const char *chunk) {
-    rb_yield(rb_utf8_str_new_cstr(chunk));
+struct next_args {
+    void *stream;
+    char *result;
+    char *err;
+};
+
+static void *next_no_gvl(void *data) {
+    struct next_args *a = (struct next_args *)data;
+    a->result = fmm_stream_next(a->stream, &a->err);
+    return NULL;
 }
 
 static VALUE rb_fmm_stream(VALUE self, VALUE prompt) {
     void *p = DATA_PTR(self);
-    char *err = NULL;
-    fmm_session_stream(p, StringValueCStr(prompt), stream_cb, &err);
-    if (err) {
-        VALUE m = rb_utf8_str_new_cstr(err);
-        free(err);
-        rb_raise(eGen, "%s", StringValueCStr(m));
+    void *stream = fmm_stream_start(p, StringValueCStr(prompt));
+
+    while (1) {
+        struct next_args a = { stream, NULL, NULL };
+        rb_thread_call_without_gvl(next_no_gvl, &a, RUBY_UBF_IO, NULL);
+        if (a.result) {
+            VALUE chunk = rb_utf8_str_new_cstr(a.result);
+            free(a.result);
+            rb_yield(chunk);
+        } else {
+            if (a.err) {
+                VALUE m = rb_utf8_str_new_cstr(a.err);
+                free(a.err);
+                fmm_stream_free(stream);
+                rb_raise(eGen, "%s", StringValueCStr(m));
+            }
+            break;
+        }
     }
+    fmm_stream_free(stream);
     return Qnil;
 }
 
@@ -79,7 +113,7 @@ void Init_foundation_model_mac(void) {
 
     rb_define_singleton_method(mod, "__availability_reason", rb_fmm_availability, 0);
 
-    VALUE cNative = rb_define_class_under(mod, "__Native", rb_cObject);
+    VALUE cNative = rb_define_class_under(mod, "Native", rb_cObject);
     rb_define_alloc_func(cNative, rb_fmm_alloc);
     rb_define_method(cNative, "initialize", rb_fmm_init,    -1);
     rb_define_method(cNative, "respond",    rb_fmm_respond,  1);
