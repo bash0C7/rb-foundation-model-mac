@@ -1,36 +1,28 @@
 # rb-foundation-model-mac
 
-On-device LLM inference for Ruby on macOS via [Ollama](https://ollama.ai).
-
-The gem's API is named for Apple Foundation Models (which it will eventually support natively on macOS 26+). For now it routes to a local Ollama server, so it runs on any macOS version that can host Ollama.
+On-device LLM inference for Ruby on macOS via the native [Apple Foundation Models](https://developer.apple.com/documentation/foundationmodels) framework (Apple Intelligence).
 
 ## Requirements
 
-- macOS (any version supported by Ollama)
+- macOS 26+ (Tahoe / 後継)
+- Apple Silicon
+- Apple Intelligence が有効化されてオンデバイスモデルが download 完了済み (Settings → Apple Intelligence & Siri)
 - Ruby 3.2+
-- A running Ollama server with at least one chat-capable model pulled
+- Swift 6.3+ (推奨インストーラ: [`swiftly`](https://www.swift.org/install/macos/))
 
 ## Installation
 
-Add to your Gemfile:
+`Gemfile`:
 
 ```ruby
 gem "rb-foundation-model-mac"
 ```
 
-Run a model in Ollama (any chat-capable model works; `gemma4:e2b` is the gem's default for fast iteration):
-
 ```bash
-ollama pull gemma4:e2b
-ollama serve  # if not already running
+bundle install
 ```
 
-Configure host/model via environment variables if you don't want the defaults:
-
-```bash
-export OLLAMA_HOST=http://localhost:11434     # default
-export OLLAMA_MODEL=gemma4:e2b                 # default
-```
+ビルド時に Swift native extension が `swift build` 経由で組まれる。Xcode は不要。
 
 ## Usage
 
@@ -67,22 +59,17 @@ end
 session.close
 ```
 
-### Programmatic configuration
+## Errors
 
-```ruby
-AppleFoundationModel.configure do |c|
-  c.instance_variable_set(:@host, "http://my-ollama:11434")
-  c.instance_variable_set(:@default_model, "llama3.2:latest")
-end
-```
-
-(or use `OLLAMA_HOST` / `OLLAMA_MODEL` env vars at process startup, which is the recommended path.)
+- `AppleFoundationModel::UnavailableError` — Apple Intelligence が利用できない（macOS バージョン不足、ハードウェア未対応、ユーザーが未有効化、モデル未 download など）。`Session.new` 時に reason を含めて raise。
+- `AppleFoundationModel::GenerationError` — Apple FM の推論中エラー（context overflow / guardrail violation など）。
+- `AppleFoundationModel::Error` — 上記の親、および closed Session への操作などその他の Ruby 側エラー。
 
 ## Roadmap
 
-- Apple Foundation Models backend (macOS 26+) via Swift FFI — when Apple's API surface stabilizes and the dev machine can run macOS 26.
-- Embeddings API (consumed by `rb-apple-sdk-knowledge`).
-- Tool / function calling.
+- Embeddings API（`rb-apple-sdk-knowledge` で消費）
+- Tool / function calling
+- Cancellation サポート（現在は Apple FM Task のキャンセル経路を Ruby に橋渡ししていない）
 
 ## License
 
