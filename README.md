@@ -59,6 +59,46 @@ end
 session.close
 ```
 
+## Examples
+
+`examples/` ディレクトリに実行可能なサンプルコードが含まれています。
+
+### English Examples
+
+**One-shot generation:**
+```bash
+bundle exec ruby examples/basic_generation.rb
+```
+
+**Multi-turn session (context aware):**
+```bash
+bundle exec ruby examples/multi_turn.rb
+```
+
+**Streaming response:**
+```bash
+bundle exec ruby examples/streaming.rb
+```
+
+### 日本語サンプル
+
+**シンプル版（引数で質問を指定）:**
+```bash
+bundle exec ruby examples/japanese_simple.rb "あなたの質問"
+```
+デフォルト: `"Rubyについて短く説明してください。"`
+
+**マルチプロンプト版（複数の質問を処理）:**
+```bash
+bundle exec ruby examples/japanese_session.rb "質問1" "質問2" "質問3"
+```
+
+**ストリーミング版（リアルタイム出力）:**
+```bash
+bundle exec ruby examples/japanese_streaming.rb "あなたの質問"
+```
+デフォルト: `"人工知能についてについて、詳しく説明してください。"`
+
 ## Errors
 
 - `AppleFoundationModel::UnavailableError` — Apple Intelligence が利用できない（macOS バージョン不足、ハードウェア未対応、ユーザーが未有効化、モデル未 download など）。`Session.new` 時に reason を含めて raise。
