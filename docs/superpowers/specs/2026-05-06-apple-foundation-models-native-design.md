@@ -550,11 +550,27 @@ end
 
 ## 重要な技術的注意
 
-1. **GVL**: `rb_fmm_respond` / `rb_fmm_stream` は内部で `DispatchSemaphore.wait()` するため、その間 Ruby GVL を抱えたまま blocking する。Apple FM 推論は数秒オーダーかかるため、他 Ruby スレッドが stall する。今回は **シンプル追求でこの挙動を許容**する。問題化したら後で `rb_thread_call_without_gvl` + `rb_thread_call_with_gvl` パターンに移行する（後付け可能）。
+1. **GVL**: `rb_fmm_respond` / `rb_fmm_stream` は `rb_thread_call_without_gvl` で Swift 待ちを GVL 外で行うため、推論中も他 Ruby スレッドは動ける。streaming は `fmm_stream_next` を GVL 外で待ち、chunk が来たら GVL 取り戻して `rb_yield`、をループ。
 2. **Streaming chunk の累積前提**: Apple FM の `streamResponse` partial が cumulative であることを前提に diff 切り出し。万一前提が崩れた場合 (新 partial が prev の prefix でない) は新 chunk として全文 yield する fallback を設ける。
-3. **`@convention(c)` callback**: Swift クロージャを C 関数ポインタとして渡せる。ctx 引数は今回不使用（Ruby の `rb_yield` は thread-local の current frame の block を呼ぶため ctx 不要）。
-4. **エラー識別の簡素化**: `UnavailableError` は availability check（`Session.new` 時）でしか raise されない設計。それ以外の Apple FM 由来エラーはすべて `GenerationError`。エラー種別 prefix の解析は不要。
-5. **キャンセル / interrupt**: 今回スコープ外。Apple FM はキャンセル可能（Swift の `Task.cancel()`）だが、Ruby `Thread#raise` ↔ Swift Task のシグナル橋渡しは複雑度爆発するため後回し。
+3. **エラー識別の簡素化**: `UnavailableError` は availability check（`Session.new` 時）でしか raise されない設計。それ以外の Apple FM 由来エラーはすべて `GenerationError`。エラー種別 prefix の解析は不要。
+4. **キャンセル / interrupt**: 今回スコープ外。Apple FM はキャンセル可能（Swift の `Task.cancel()`）だが、Ruby `Thread#raise` ↔ Swift Task のシグナル橋渡しは複雑度爆発するため後回し。
+
+## 設計後変更（2026-05-06 実装中に判明）
+
+`fmm_session_stream` の **streaming 機構を当初の Approach 1（C 関数ポインタ callback）から Approach 3（Ruby thread polling）に切り替えた**。理由：
+
+- Swift `Task { ... }` は GCD worker thread で実行され、Ruby が登録した thread と異なる。
+- `rb_thread_call_with_gvl` は「Ruby が登録した thread」からしか呼べないため、Swift Task の thread に乗った C callback で `rb_yield` を試みると `[BUG] rb_thread_call_with_gvl() is called by non-ruby thread` で crash する。
+
+切り替え後の構成：
+
+- Swift `@c` 関数を 3 個に分割: `fmm_stream_start(ptr, prompt) -> stream_handle` / `fmm_stream_next(stream, error_out) -> CChar*` / `fmm_stream_free(stream)`。
+- Swift 側 `FMMStream` class が `OSAllocatedUnfairLock<State>` で chunk queue・done フラグ・error を async-safe に保護（NSLock は Swift 6 strict concurrency で async context から禁止）。
+- Apple FM の Task は背景で chunk を `enqueue` し、完了時に `finish(err)` を呼ぶ。
+- Ruby 側 `rb_fmm_stream` は `rb_thread_call_without_gvl(fmm_stream_next, ...)` を loop で呼び、各 chunk を blocking 取得 → GVL 取り戻して `rb_yield`、queue 空＋done で抜ける。
+- chunk が enqueue された瞬間に semaphore signal が走り、Ruby thread が即 wake up して yield するため、Apple FM の streaming リアルタイム性は保たれる（Q2 A の本質「chunk 毎に Ruby block が走る」は維持）。
+
+`@convention(c)` callback function pointer は使わない設計に変わったため、`CallbackHolder` 等の Sendable wrapper も実装からは削除されている（spec のサンプルコードは設計の出発点を示すが、実装は polling 形のため上記参照）。
 
 ## TDD コミット境界
 
