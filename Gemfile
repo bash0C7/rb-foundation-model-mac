@@ -6,7 +6,7 @@ source "https://rubygems.org"
 gemspec
 
 # Local sibling repo during development. Comment out once swift_gem is published.
-gem "swift_gem", path: "../swift_gem"
+gem "swift_gem", git: "https://github.com/bash0C7/swift_gem"
 
 gem "irb"
 gem "rake", "~> 13.0"
