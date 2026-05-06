@@ -20,3 +20,6 @@ ext/**/*-Swift.h
 lib/**/*.bundle
 lib/**/*.bundle.dSYM/
 /tmp/
+
+# Claude Code per-user settings
+.claude/settings.local.json
