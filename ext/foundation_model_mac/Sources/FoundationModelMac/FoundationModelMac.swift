@@ -172,7 +172,7 @@ public func fmm_stream_start(
                     if !stops.isEmpty {
                         for stop in stops {
                             if cumulative.contains(stop) {
-                                stream.finish(nil)
+                                stream.cancel()
                                 return
                             }
                         }
