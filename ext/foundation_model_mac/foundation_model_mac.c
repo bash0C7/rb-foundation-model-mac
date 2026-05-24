@@ -80,9 +80,34 @@ static void *next_no_gvl(void *data) {
     return NULL;
 }
 
-static VALUE rb_fmm_stream(VALUE self, VALUE prompt) {
+static VALUE rb_fmm_stream(int argc, VALUE *argv, VALUE self) {
+    VALUE prompt, kwargs;
+    rb_scan_args(argc, argv, "1:", &prompt, &kwargs);
+
+    const char **stop_arr = NULL;
+    long stop_count = 0;
+    if (!NIL_P(kwargs)) {
+        VALUE keys[1];
+        VALUE vals[1];
+        keys[0] = ID2SYM(rb_intern("stop_at"));
+        rb_get_kwargs(kwargs, &keys[0], 0, 1, &vals[0]);
+        if (vals[0] != Qundef && !NIL_P(vals[0])) {
+            Check_Type(vals[0], T_ARRAY);
+            stop_count = RARRAY_LEN(vals[0]);
+            if (stop_count > 0) {
+                stop_arr = (const char **)malloc(sizeof(const char *) * stop_count);
+                for (long i = 0; i < stop_count; i++) {
+                    stop_arr[i] = StringValueCStr(RARRAY_AREF(vals[0], i));
+                }
+            }
+        }
+    }
+
     void *p = DATA_PTR(self);
-    void *stream = fmm_stream_start(p, StringValueCStr(prompt));
+    void *stream = fmm_stream_start(p, StringValueCStr(prompt), stop_arr, (int)stop_count);
+    if (stop_arr) free(stop_arr);
+
+    rb_ivar_set(self, rb_intern("@__active_stream"), ULL2NUM((uintptr_t)stream));
 
     while (1) {
         struct next_args a = { stream, NULL, NULL };
@@ -96,12 +121,22 @@ static VALUE rb_fmm_stream(VALUE self, VALUE prompt) {
                 VALUE m = rb_utf8_str_new_cstr(a.err);
                 free(a.err);
                 fmm_stream_free(stream);
+                rb_ivar_set(self, rb_intern("@__active_stream"), Qnil);
                 rb_raise(eGen, "%s", StringValueCStr(m));
             }
             break;
         }
     }
     fmm_stream_free(stream);
+    rb_ivar_set(self, rb_intern("@__active_stream"), Qnil);
+    return Qnil;
+}
+
+static VALUE rb_fmm_cancel_stream(VALUE self) {
+    VALUE v = rb_ivar_get(self, rb_intern("@__active_stream"));
+    if (NIL_P(v)) return Qnil;
+    void *stream = (void *)(uintptr_t)NUM2ULL(v);
+    fmm_stream_cancel(stream);
     return Qnil;
 }
 
@@ -117,5 +152,6 @@ void Init_foundation_model_mac(void) {
     rb_define_alloc_func(cNative, rb_fmm_alloc);
     rb_define_method(cNative, "initialize", rb_fmm_init,    -1);
     rb_define_method(cNative, "respond",    rb_fmm_respond,  1);
-    rb_define_method(cNative, "stream",     rb_fmm_stream,   1);
+    rb_define_method(cNative, "stream",        rb_fmm_stream,        -1);
+    rb_define_method(cNative, "cancel_stream", rb_fmm_cancel_stream,  0);
 }
