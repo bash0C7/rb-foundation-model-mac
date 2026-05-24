@@ -111,6 +111,18 @@ bundle exec ruby examples/japanese_streaming.rb "あなたの質問"
 - Tool / function calling
 - Cancellation support (the Apple FM Task cancellation path is not currently bridged to Ruby)
 
+## Migration
+
+### Breaking (v0.x → v0.y)
+
+- Swift / C-ABI `fmm_stream_start` gained two new parameters: `stop_strings: UnsafePointer<UnsafePointer<CChar>?>?` and `stop_count: Int32`. Existing native callers (other than this gem's own C bridge) must pass `nil, 0` to retain old behaviour.
+- Ruby callers are unaffected — the Ruby `Native#stream` method accepts the new `stop_at:` kwarg, and `Session#stream_response` exposes it; the old positional-only call (`session.stream_response(to: "...") { |c| ... }`) continues to work unchanged.
+
+### Added
+
+- `Session#stream_response(to:, stop_at: [String])` — stop streaming when cumulative output contains any of the given strings (Swift-side check, low-latency).
+- `Session#cancel_stream` — abort an in-flight stream from outside the block (useful for client-side parsers that detect completion).
+
 ## License
 
 MIT
