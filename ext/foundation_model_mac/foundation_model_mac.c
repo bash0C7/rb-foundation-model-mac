@@ -74,6 +74,13 @@ struct next_args {
     char *err;
 };
 
+struct yield_args { VALUE chunk; };
+static VALUE do_yield(VALUE arg) {
+    struct yield_args *a = (struct yield_args *)arg;
+    rb_yield(a->chunk);
+    return Qnil;
+}
+
 static void *next_no_gvl(void *data) {
     struct next_args *a = (struct next_args *)data;
     a->result = fmm_stream_next(a->stream, &a->err);
@@ -115,7 +122,16 @@ static VALUE rb_fmm_stream(int argc, VALUE *argv, VALUE self) {
         if (a.result) {
             VALUE chunk = rb_utf8_str_new_cstr(a.result);
             free(a.result);
-            rb_yield(chunk);
+            {
+                int state = 0;
+                struct yield_args ya = { chunk };
+                rb_protect(do_yield, (VALUE)&ya, &state);
+                if (state) {
+                    fmm_stream_free(stream);
+                    rb_ivar_set(self, rb_intern("@__active_stream"), Qnil);
+                    rb_jump_tag(state);
+                }
+            }
         } else {
             if (a.err) {
                 VALUE m = rb_utf8_str_new_cstr(a.err);

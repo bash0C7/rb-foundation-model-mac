@@ -58,4 +58,17 @@ class TestStreaming < Test::Unit::TestCase
     assert chunks.length < 50, "cancel_stream should terminate the loop quickly"
     session.close
   end
+
+  def test_block_break_does_not_leak_stream
+    session = AppleFoundationModel::Session.new(instructions: "Reply briefly.")
+    begin
+      session.stream_response(to: "Say hi.") do |_chunk|
+        break
+      end
+      # rb_protect caught the break: @__active_stream must be cleared (not a leaked pointer)
+      assert_nil session.instance_variable_get(:@__active_stream)
+    ensure
+      session.close
+    end
+  end
 end
