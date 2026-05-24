@@ -109,7 +109,6 @@ bundle exec ruby examples/japanese_streaming.rb "あなたの質問"
 
 - Embeddings API (consumed by `rb-apple-sdk-knowledge`)
 - Tool / function calling
-- Cancellation support (the Apple FM Task cancellation path is not currently bridged to Ruby)
 
 ## Migration
 
