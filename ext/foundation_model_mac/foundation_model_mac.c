@@ -87,10 +87,10 @@ static VALUE rb_fmm_stream(int argc, VALUE *argv, VALUE self) {
     const char **stop_arr = NULL;
     long stop_count = 0;
     if (!NIL_P(kwargs)) {
-        VALUE keys[1];
+        ID keys[1];
         VALUE vals[1];
-        keys[0] = ID2SYM(rb_intern("stop_at"));
-        rb_get_kwargs(kwargs, &keys[0], 0, 1, &vals[0]);
+        keys[0] = rb_intern("stop_at");
+        rb_get_kwargs(kwargs, keys, 0, 1, vals);
         if (vals[0] != Qundef && !NIL_P(vals[0])) {
             Check_Type(vals[0], T_ARRAY);
             stop_count = RARRAY_LEN(vals[0]);
