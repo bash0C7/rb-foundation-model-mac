@@ -26,12 +26,17 @@ final class FMMStream: @unchecked Sendable {
         var queue: [String] = []
         var done: Bool = false
         var caught: Error? = nil
+        var cancelled: Bool = false
     }
     let state = OSAllocatedUnfairLock<State>(initialState: State())
     let signal = DispatchSemaphore(value: 0)
+    var task: Task<Void, Never>? = nil
 
     func enqueue(_ chunk: String) {
-        state.withLock { $0.queue.append(chunk) }
+        state.withLock {
+            if $0.cancelled { return }
+            $0.queue.append(chunk)
+        }
         signal.signal()
     }
 
@@ -39,6 +44,15 @@ final class FMMStream: @unchecked Sendable {
         state.withLock {
             $0.done = true
             $0.caught = err
+        }
+        signal.signal()
+    }
+
+    func cancel() {
+        task?.cancel()
+        state.withLock {
+            $0.cancelled = true
+            $0.done = true
         }
         signal.signal()
     }
@@ -112,17 +126,30 @@ public func fmm_session_respond(
 @c
 public func fmm_stream_start(
     _ ptr: UnsafeMutableRawPointer,
-    _ prompt: UnsafePointer<CChar>
+    _ prompt: UnsafePointer<CChar>,
+    _ stop_strings: UnsafePointer<UnsafePointer<CChar>?>?,
+    _ stop_count: Int32
 ) -> UnsafeMutableRawPointer {
     let s = Unmanaged<FMMSession>.fromOpaque(ptr).takeUnretainedValue()
     let p = String(cString: prompt)
     let stream = FMMStream()
 
-    Task {
+    var stops: [String] = []
+    if let arr = stop_strings, stop_count > 0 {
+        for i in 0..<Int(stop_count) {
+            if let cstr = arr[i] {
+                stops.append(String(cString: cstr))
+            }
+        }
+    }
+
+    let task = Task {
         var caught: Error? = nil
         do {
             var prev = ""
+            var cumulative = ""
             for try await partial in s.session.streamResponse(to: p) {
+                if Task.isCancelled { break }
                 let cum = partial.content
                 var chunk: String? = nil
                 if cum.hasPrefix(prev) && cum.count > prev.count {
@@ -133,7 +160,16 @@ public func fmm_stream_start(
                     prev = cum
                 }
                 if let c = chunk {
+                    cumulative += c
                     stream.enqueue(c)
+                    if !stops.isEmpty {
+                        for stop in stops {
+                            if cumulative.contains(stop) {
+                                stream.finish(nil)
+                                return
+                            }
+                        }
+                    }
                 }
             }
         } catch {
@@ -141,6 +177,7 @@ public func fmm_stream_start(
         }
         stream.finish(caught)
     }
+    stream.task = task
 
     return Unmanaged.passRetained(stream).toOpaque()
 }
@@ -173,4 +210,10 @@ public func fmm_stream_next(
 @c
 public func fmm_stream_free(_ ptr: UnsafeMutableRawPointer) {
     Unmanaged<FMMStream>.fromOpaque(ptr).release()
+}
+
+@c
+public func fmm_stream_cancel(_ ptr: UnsafeMutableRawPointer) {
+    let stream = Unmanaged<FMMStream>.fromOpaque(ptr).takeUnretainedValue()
+    stream.cancel()
 }
