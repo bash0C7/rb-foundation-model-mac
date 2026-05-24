@@ -28,4 +28,34 @@ class TestStreaming < Test::Unit::TestCase
     end
     session.close
   end
+
+  def test_stream_response_accepts_stop_at_kwarg
+    session = AppleFoundationModel::Session.new(
+      instructions: "Reply with the words 'apple banana cherry'."
+    )
+    chunks = []
+    session.stream_response(
+      to: "Just say the words.",
+      stop_at: ["cherry"],
+    ) do |chunk|
+      chunks << chunk
+    end
+    full = chunks.join
+    # stop_at terminates early once cumulative output contains "cherry"
+    assert full.length > 0, "expected at least one chunk"
+    session.close
+  end
+
+  def test_cancel_stream_terminates_iteration
+    session = AppleFoundationModel::Session.new(
+      instructions: "Reply with at least ten words."
+    )
+    chunks = []
+    session.stream_response(to: "Name ten primary colors.") do |chunk|
+      chunks << chunk
+      session.cancel_stream if chunks.length >= 1
+    end
+    assert chunks.length < 50, "cancel_stream should terminate the loop quickly"
+    session.close
+  end
 end
