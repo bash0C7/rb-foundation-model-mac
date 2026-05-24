@@ -87,6 +87,11 @@ static void *next_no_gvl(void *data) {
     return NULL;
 }
 
+static void *wait_for_task_no_gvl(void *data) {
+    fmm_stream_wait_for_task(data);
+    return NULL;
+}
+
 static VALUE rb_fmm_stream(int argc, VALUE *argv, VALUE self) {
     VALUE prompt, kwargs;
     rb_scan_args(argc, argv, "1:", &prompt, &kwargs);
@@ -127,6 +132,8 @@ static VALUE rb_fmm_stream(int argc, VALUE *argv, VALUE self) {
                 struct yield_args ya = { chunk };
                 rb_protect(do_yield, (VALUE)&ya, &state);
                 if (state) {
+                    fmm_stream_cancel(stream);
+                    rb_thread_call_without_gvl(wait_for_task_no_gvl, stream, RUBY_UBF_IO, NULL);
                     fmm_stream_free(stream);
                     rb_ivar_set(self, rb_intern("@__active_stream"), Qnil);
                     rb_jump_tag(state);
