@@ -30,6 +30,7 @@ final class FMMStream: @unchecked Sendable {
     }
     let state = OSAllocatedUnfairLock<State>(initialState: State())
     let signal = DispatchSemaphore(value: 0)
+    let taskDone = DispatchSemaphore(value: 0)
     var task: Task<Void, Never>? = nil
 
     func enqueue(_ chunk: String) {
@@ -46,6 +47,7 @@ final class FMMStream: @unchecked Sendable {
             $0.caught = err
         }
         signal.signal()
+        taskDone.signal()
     }
 
     func cancel() {
@@ -55,6 +57,11 @@ final class FMMStream: @unchecked Sendable {
             $0.done = true
         }
         signal.signal()
+        taskDone.signal()
+    }
+
+    func waitForTask() {
+        taskDone.wait()
     }
 
     func dequeue() -> (chunk: String?, done: Bool, caught: Error?) {
@@ -216,4 +223,10 @@ public func fmm_stream_free(_ ptr: UnsafeMutableRawPointer) {
 public func fmm_stream_cancel(_ ptr: UnsafeMutableRawPointer) {
     let stream = Unmanaged<FMMStream>.fromOpaque(ptr).takeUnretainedValue()
     stream.cancel()
+}
+
+@c
+public func fmm_stream_wait_for_task(_ ptr: UnsafeMutableRawPointer) {
+    let stream = Unmanaged<FMMStream>.fromOpaque(ptr).takeUnretainedValue()
+    stream.waitForTask()
 }
