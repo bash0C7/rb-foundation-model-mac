@@ -30,6 +30,4 @@ Gem::Specification.new do |spec|
   spec.executables = spec.files.grep(%r{\Aexe/}) { |f| File.basename(f) }
   spec.require_paths = ["lib"]
   spec.extensions = ["ext/foundation_model_mac/extconf.rb"]
-
-  spec.add_runtime_dependency "swift_gem", "~> 0.1"
 end

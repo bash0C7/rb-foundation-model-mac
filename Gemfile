@@ -5,9 +5,6 @@ source "https://rubygems.org"
 # Specify your gem's dependencies in rb-foundation-model-mac.gemspec
 gemspec
 
-# Local sibling repo during development. Comment out once swift_gem is published.
-gem "swift_gem", git: "https://github.com/bash0C7/swift_gem"
-
 gem "irb"
 gem "rake", "~> 13.0"
 gem "rake-compiler", "~> 1.2"
