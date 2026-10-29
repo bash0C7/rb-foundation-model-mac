@@ -1,28 +1,24 @@
 # rb-foundation-model-mac
 
-On-device LLM inference for Ruby on macOS via the native [Apple Foundation Models](https://developer.apple.com/documentation/foundationmodels) framework (Apple Intelligence).
+Ruby binding for Apple's on-device [Foundation Models](https://developer.apple.com/documentation/foundationmodels) framework (Apple Intelligence) on macOS / Apple Silicon. Calls `LanguageModelSession` on the default `SystemLanguageModel` from Ruby via Swift Package Manager and a thin C bridge. Built on [swift_gem](https://github.com/bash0C7/swift_gem).
 
 ## Requirements
 
-- macOS 26+ (Tahoe / later)
-- Apple Silicon
-- Apple Intelligence enabled with the on-device model fully downloaded (Settings → Apple Intelligence & Siri)
-- Ruby 3.2+
-- Swift 6.3+ (recommended installer: [`swiftly`](https://www.swift.org/install/macos/))
+- macOS 27+, Apple Silicon
+- Apple Intelligence enabled with the on-device model downloaded (System Settings → Apple Intelligence & Siri)
+- Xcode 27 (builds run `xcrun swift`)
+- Ruby 4.0+, Bundler 4.x
 
 ## Installation
 
-`Gemfile`:
-
-```ruby
-gem "rb-foundation-model-mac"
-```
+Install from source:
 
 ```bash
+git clone https://github.com/bash0C7/rb-foundation-model-mac.git
+cd rb-foundation-model-mac
 bundle install
+bundle exec rake compile
 ```
-
-The Swift native extension is built via `swift build` at install time. Xcode is not required.
 
 ## Usage
 
@@ -31,25 +27,28 @@ The Swift native extension is built via `swift build` at install time. Xcode is 
 ```ruby
 require "foundation_model_mac"
 
-response = AppleFoundationModel.generate(
+AppleFoundationModel.generate(
   prompt: "Name three programming languages.",
   instructions: "Reply with a comma-separated list."
 )
-puts response
+# => "Python, JavaScript, Java"
 ```
 
 ### Multi-turn session
 
+A `Session` keeps the conversation, so each prompt sees the earlier turns.
+
 ```ruby
-session = AppleFoundationModel::Session.new(
-  instructions: "You answer in one sentence."
-)
-puts session.respond(to: "What's a Ruby block?")
-puts session.respond(to: "Give me one example.")  # remembers context
+session = AppleFoundationModel::Session.new(instructions: "You answer in one sentence.")
+session.respond(to: "My name is Alice.")
+session.respond(to: "What is my name?")
+# => "Your name is Alice."
 session.close
 ```
 
 ### Streaming
+
+`stream_response` yields the response in incremental chunks as the model generates it and returns the concatenated text.
 
 ```ruby
 session = AppleFoundationModel::Session.new
@@ -59,69 +58,65 @@ end
 session.close
 ```
 
-## Examples
+Generation stops early in three ways:
 
-The `examples/` directory contains runnable sample code.
+- `stop_at:` takes an array of strings. Generation stops as soon as the response contains any of them; the chunk that completes the stop string is the last one yielded.
+- `session.cancel_stream`, called inside the block, stops generation. No further chunks are yielded.
+- Leaving the block with `break` or an exception stops generation.
 
-### English Examples
+The following call returns the text up to and including the first chunk that contains `"5"`. A chunk can hold several characters, so the text can run past the `5`.
 
-**One-shot generation:**
-```bash
-bundle exec ruby examples/basic_generation.rb
+```ruby
+session.stream_response(to: "Count from 1 to 20, one number per line.", stop_at: ["5"]) { |chunk| }
 ```
 
-**Multi-turn session (context aware):**
-```bash
-bundle exec ruby examples/multi_turn.rb
-```
+`Interrupt` (Ctrl-C), `Thread#raise`, and `Thread#kill` stop generation in both `respond` and `stream_response`.
 
-**Streaming response:**
-```bash
-bundle exec ruby examples/streaming.rb
-```
+`respond` and `stream_response` return once the model has stopped, so the session accepts the next prompt right away. A stopped response stays in the session's history with all the text the model generated before it stopped, which can be longer than the text yielded to the block. The next prompt sees that unfinished response, and the model may continue it: after a story is stopped halfway, `"Say hi."` can get the rest of the story. A request that fails with `GenerationError` leaves no trace in the history.
 
-### 日本語サンプル
+Open an IRB console with the gem preloaded:
 
-**シンプル版（引数で質問を指定）:**
 ```bash
-bundle exec ruby examples/japanese_simple.rb "あなたの質問"
+bundle exec rake console
 ```
-デフォルト: `"Rubyについて短く説明してください。"`
-
-**マルチプロンプト版（複数の質問を処理）:**
-```bash
-bundle exec ruby examples/japanese_session.rb "質問1" "質問2" "質問3"
-```
-
-**ストリーミング版（リアルタイム出力）:**
-```bash
-bundle exec ruby examples/japanese_streaming.rb "あなたの質問"
-```
-デフォルト: `"人工知能についてについて、詳しく説明してください。"`
 
 ## Errors
 
-- `AppleFoundationModel::UnavailableError` — Apple Intelligence is not available (unsupported macOS version, unsupported hardware, user has not enabled it, model not yet downloaded, etc.). Raised from `Session.new` with the reason included.
-- `AppleFoundationModel::GenerationError` — error during Apple FM inference (context overflow, guardrail violation, etc.).
-- `AppleFoundationModel::Error` — parent of the above, plus other Ruby-side errors such as operating on a closed Session.
+- `AppleFoundationModel::UnavailableError`: raised by `Session.new` and `generate` when the on-device model is unavailable. The message carries the reason: `deviceNotEligible`, `appleIntelligenceNotEnabled`, or `modelNotReady`.
+- `AppleFoundationModel::GenerationError`: raised when generation fails, for example on a guardrail violation or when the context window is exceeded. The session stays usable.
+- `AppleFoundationModel::Error`: the parent of both, also raised by `respond` and `stream_response` on a closed session.
 
-## Roadmap
+## Reference: Ruby examples
 
-- Embeddings API (consumed by `rb-apple-sdk-knowledge`)
-- Tool / function calling
+```bash
+bundle exec rake compile
+bundle exec ruby examples/basic_generation.rb
+bundle exec ruby examples/multi_turn.rb
+bundle exec ruby examples/streaming.rb
+bundle exec ruby examples/japanese_simple.rb "Rubyについて短く説明してください。"
+bundle exec ruby examples/japanese_session.rb "macOSとは何ですか？" "これまでの説明をまとめてください。"
+bundle exec ruby examples/japanese_streaming.rb "人工知能について、詳しく説明してください。"
+```
 
-## Migration
+The Japanese examples fall back to built-in prompts when called without arguments.
 
-### Breaking (v0.x → v0.y)
+## Reference: pure Swift sample
 
-- Swift / C-ABI `fmm_stream_start` gained two new parameters: `stop_strings: UnsafePointer<UnsafePointer<CChar>?>?` and `stop_count: Int32`. Existing native callers (other than this gem's own C bridge) must pass `nil, 0` to retain old behaviour.
-- Ruby callers are unaffected — the Ruby `Native#stream` method accepts the new `stop_at:` kwarg, and `Session#stream_response` exposes it; the old positional-only call (`session.stream_response(to: "...") { |c| ... }`) continues to work unchanged.
+`examples/foundation_model_mac.swift` streams a response without Ruby:
 
-### Added
+```bash
+xcrun swift examples/foundation_model_mac.swift "Tell me a fact."
+```
 
-- `Session#stream_response(to:, stop_at: [String])` — stop streaming when cumulative output contains any of the given strings (Swift-side check, low-latency).
-- `Session#cancel_stream` — abort an in-flight stream from outside the block (useful for client-side parsers that detect completion).
+## Development
+
+```bash
+bundle install
+bundle exec rake test
+```
+
+`rake test` validates `sig/foundation_model_mac.rbs`, runs `xcrun swift build -c release --package-path ext/foundation_model_mac`, builds the C extension into `lib/foundation_model_mac/foundation_model_mac.bundle`, then runs the tests. The tests call the on-device model and are omitted when it is unavailable. `bundle exec rake compile` runs only the build.
 
 ## License
 
-MIT
+MIT.
