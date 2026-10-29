@@ -7,7 +7,6 @@ session = AppleFoundationModel::Session.new(
   instructions: "日本語で丁寧に、わかりやすく答えてください。"
 )
 
-# ARGV からプロンプトを読み込む
 prompts = if ARGV.empty?
   [
     "macOSとは何ですか？",

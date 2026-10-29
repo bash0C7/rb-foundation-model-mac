@@ -1,10 +1,11 @@
 # frozen_string_literal: true
+
 require "test_helper"
 
 class TestGenerate < Test::Unit::TestCase
   def setup
-    omit "Apple Intelligence unavailable: #{apple_foundation_model_unavailable_reason}" \
-      unless apple_foundation_model_available?
+    reason = apple_foundation_model_unavailable_reason
+    omit reason if reason
   end
 
   def test_generate_returns_non_empty_string
