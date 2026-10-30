@@ -1,10 +1,11 @@
 # frozen_string_literal: true
+
 require "test_helper"
 
 class TestSession < Test::Unit::TestCase
   def setup
-    omit "Apple Intelligence unavailable: #{apple_foundation_model_unavailable_reason}" \
-      unless apple_foundation_model_available?
+    reason = apple_foundation_model_unavailable_reason
+    omit reason if reason
   end
 
   def test_session_with_instructions_responds
@@ -33,6 +34,32 @@ class TestSession < Test::Unit::TestCase
     response = session.respond(to: "What is my name?")
     assert_match(/alice/i, response,
                   "session should remember 'Alice' across turns; got: #{response.inspect}")
+    session.close
+  end
+
+  def test_interrupt_stops_respond_without_waiting_for_the_response
+    session = AppleFoundationModel::Session.new
+    main = Thread.current
+    interrupted_at = nil
+    Thread.new do
+      sleep 0.5
+      interrupted_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      main.raise(Interrupt)
+    end
+    assert_raise(Interrupt) do
+      session.respond(to: slow_to_start_prompt)
+    end
+    assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - interrupted_at, :<, 3
+    assert_kind_of String, session.respond(to: "Say hi.")
+    session.close
+  end
+
+  def test_generation_error_leaves_the_session_usable
+    session = AppleFoundationModel::Session.new(instructions: "Reply briefly.")
+    assert_raise(AppleFoundationModel::GenerationError) do
+      session.respond(to: "apple " * 6000)
+    end
+    assert_kind_of String, session.respond(to: "Say hi.")
     session.close
   end
 

@@ -1,0 +1,51 @@
+module AppleFoundationModel
+  # The gem version.
+  VERSION: String
+
+  # Base class for errors raised by this gem, also raised when a closed Session is used.
+  class Error < StandardError
+  end
+
+  # Raised by Session.new when the on-device system language model is unavailable.
+  # The message carries the reason: deviceNotEligible, appleIntelligenceNotEnabled, or modelNotReady.
+  class UnavailableError < Error
+  end
+
+  # Raised when the model fails to generate a response, for example on a guardrail violation or when the context window is exceeded.
+  class GenerationError < Error
+  end
+
+  # Sends +prompt+ to a new Session with optional +instructions+, closes the session, and returns the response text.
+  def self.generate: (prompt: String, ?instructions: String?) -> String
+
+  # A conversation with the on-device system language model that keeps its transcript across turns.
+  class Session
+    # Opens a session with optional +instructions+ that steer every response.
+    # Raises UnavailableError when the system language model is unavailable.
+    def initialize: (?instructions: String?) -> void
+
+    # Sends +to+ as the next prompt and returns the full response text.
+    # Interrupt, Thread#raise, and Thread#kill stop generation; the method returns only after the model has stopped.
+    # Raises Error when the session is closed and GenerationError when generation fails.
+    def respond: (to: String) -> String
+
+    # Sends +to+ as the next prompt and yields the response text in incremental chunks as the model generates it.
+    # Generation stops as soon as the response contains any string in +stop_at+.
+    # Returns the concatenated chunks. Leaving the block with break or an exception, Interrupt, Thread#raise, and Thread#kill stop generation.
+    # Returns only after the model has stopped, so the session accepts the next prompt right away.
+    # A stopped response stays in the history with all the text generated before it stopped, which can be longer than the yielded chunks.
+    # A response that fails with GenerationError leaves no trace in the history.
+    # Raises ArgumentError without a block, Error when the session is closed, and GenerationError when generation fails.
+    def stream_response: (to: String, ?stop_at: Array[String]?) { (String chunk) -> void } -> String
+
+    # Stops the stream in progress from inside the stream_response block. Chunks are no longer yielded after this call.
+    # Does nothing when no stream is in progress.
+    def cancel_stream: () -> nil
+
+    # Marks the session as closed. Later respond and stream_response calls raise Error.
+    def close: () -> true
+
+    # Returns whether close has been called.
+    def closed?: () -> bool
+  end
+end

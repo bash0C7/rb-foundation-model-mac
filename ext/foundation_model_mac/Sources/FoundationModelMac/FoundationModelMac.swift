@@ -1,232 +1,137 @@
-import Foundation
+import Dispatch
 import FoundationModels
 import os
 
-final class FMMSession: @unchecked Sendable {
-    let session: LanguageModelSession
-    init(instructions: String?) {
-        if let i = instructions, !i.isEmpty {
-            self.session = LanguageModelSession(
-                model: SystemLanguageModel.default,
-                instructions: i
-            )
-        } else {
-            self.session = LanguageModelSession(model: SystemLanguageModel.default)
-        }
-    }
-}
-
-private final class Box<T>: @unchecked Sendable {
-    var value: T
-    init(_ value: T) { self.value = value }
-}
-
-final class FMMStream: @unchecked Sendable {
-    struct State {
-        var queue: [String] = []
-        var done: Bool = false
-        var caught: Error? = nil
-        var cancelled: Bool = false
-    }
-    let state = OSAllocatedUnfairLock<State>(initialState: State())
-    let signal = DispatchSemaphore(value: 0)
-    let taskDone = DispatchSemaphore(value: 0)
-    var task: Task<Void, Never>? = nil
-
-    func enqueue(_ chunk: String) {
-        state.withLock {
-            if $0.cancelled { return }
-            $0.queue.append(chunk)
-        }
-        signal.signal()
-    }
-
-    func finish(_ err: Error?) {
-        state.withLock {
-            $0.done = true
-            $0.caught = err
-        }
-        signal.signal()
-        taskDone.signal()
-    }
-
-    func cancel() {
-        task?.cancel()
-        state.withLock {
-            $0.cancelled = true
-            $0.done = true
-        }
-        signal.signal()
-        taskDone.signal()
-    }
-
-    func waitForTask() {
-        taskDone.wait()
-    }
-
-    func dequeue() -> (chunk: String?, done: Bool, caught: Error?) {
-        return state.withLock { s in
-            let c = s.queue.isEmpty ? nil : s.queue.removeFirst()
-            return (c, s.done, s.caught)
-        }
-    }
-}
-
-@c
-public func fmm_availability_check() -> UnsafeMutablePointer<CChar>? {
+/// Reports why the on-device system language model cannot be used.
+///
+/// - Returns: The name of the `SystemLanguageModel.Availability.UnavailableReason` case, such as
+///   `"appleIntelligenceNotEnabled"`, or `nil` when the model is available.
+func unavailableReason() -> String? {
     switch SystemLanguageModel.default.availability {
-    case .available:
-        return nil
-    case .unavailable(let reason):
-        return strdup("\(reason)")
+    case .available: nil
+    case .unavailable(let reason): "\(reason)"
     }
 }
 
-@c
-public func fmm_session_new(
-    _ instructions: UnsafePointer<CChar>?,
-    _ error_out: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>
-) -> UnsafeMutableRawPointer? {
-    error_out.pointee = nil
-    let instr = instructions.map { String(cString: $0) }
-    let s = FMMSession(instructions: instr)
-    return Unmanaged.passRetained(s).toOpaque()
-}
-
-@c
-public func fmm_session_free(_ ptr: UnsafeMutableRawPointer) {
-    Unmanaged<FMMSession>.fromOpaque(ptr).release()
-}
-
-@c
-public func fmm_session_respond(
-    _ ptr: UnsafeMutableRawPointer,
-    _ prompt: UnsafePointer<CChar>,
-    _ error_out: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>
-) -> UnsafeMutablePointer<CChar>? {
-    error_out.pointee = nil
-    let s = Unmanaged<FMMSession>.fromOpaque(ptr).takeUnretainedValue()
-    let p = String(cString: prompt)
-
-    let sem = DispatchSemaphore(value: 0)
-    let outBox = Box<Result<String, Error>?>(nil)
-    Task {
-        do {
-            let r = try await s.session.respond(to: p)
-            outBox.value = .success(r.content)
-        } catch {
-            outBox.value = .failure(error)
-        }
-        sem.signal()
+/// Streams the response to one prompt as incremental text chunks to a thread that polls ``next()``.
+///
+/// A background task iterates `LanguageModelSession.streamResponse(to:options:)` and queues the text each cumulative
+/// snapshot adds to the previous one. Once the response contains a stop string, or after ``cancel()``, the task is
+/// cancelled and the response stream runs to its end without queueing more text. ``next()`` reports the end only
+/// after that, so the session accepts its next prompt as soon as ``next()`` returns `nil`.
+///
+/// The request runs under `TranscriptErrorHandlingPolicy.preserveTranscript`. A stopped response stays in the
+/// transcript with all the text the model generated before it stopped, which can extend past the last chunk
+/// ``next()`` returned. When the response fails with any error other than cancellation before it is stopped, the
+/// transcript is restored to its state before the prompt. ``next()`` throws every error other than cancellation.
+final class ChunkStream: Sendable {
+    private struct State {
+        var chunks: [String] = []
+        var cancelled = false
+        var finished = false
+        var error: (any Error)?
+        var task: Task<Void, Never>?
     }
-    sem.wait()
 
-    switch outBox.value! {
-    case .success(let txt):
-        return strdup(txt)
-    case .failure(let e):
-        error_out.pointee = strdup("\(e)")
-        return nil
-    }
-}
+    private let state = OSAllocatedUnfairLock(initialState: State())
+    private let changed = DispatchSemaphore(value: 0)
 
-@c
-public func fmm_stream_start(
-    _ ptr: UnsafeMutableRawPointer,
-    _ prompt: UnsafePointer<CChar>,
-    _ stop_strings: UnsafePointer<UnsafePointer<CChar>?>?,
-    _ stop_count: Int32
-) -> UnsafeMutableRawPointer {
-    let s = Unmanaged<FMMSession>.fromOpaque(ptr).takeUnretainedValue()
-    let p = String(cString: prompt)
-    let stream = FMMStream()
-
-    var stops: [String] = []
-    if let arr = stop_strings, stop_count > 0 {
-        for i in 0..<Int(stop_count) {
-            if let cstr = arr[i] {
-                stops.append(String(cString: cstr))
+    /// Starts generating the response to `prompt`.
+    ///
+    /// - Parameters:
+    ///   - session: The session that keeps the conversation.
+    ///   - prompt: The prompt text.
+    ///   - stops: Strings that end generation as soon as the response contains any of them. The chunk that completes
+    ///     a stop string is still delivered.
+    init(session: LanguageModelSession, prompt: String, stops: [String]) {
+        let task = Task { [self] in
+            let failure: (any Error)?
+            do {
+                try await generate(session: session, prompt: prompt, stops: stops)
+                failure = nil
+            } catch {
+                failure = error
             }
+            state.withLock {
+                $0.finished = true
+                $0.error = failure
+            }
+            changed.signal()
+        }
+        state.withLock { $0.task = task }
+    }
+
+    private func generate(session: LanguageModelSession, prompt: String, stops: [String]) async throws {
+        let transcript = session.transcript
+        session.transcriptErrorHandlingPolicy = .preserveTranscript
+        defer { session.transcriptErrorHandlingPolicy = nil }
+        do {
+            try await forward(session.streamResponse(to: prompt), stops: stops)
+        } catch is CancellationError {
+        } catch {
+            if !state.withLock({ $0.cancelled }) {
+                session.transcript = transcript
+            }
+            throw error
         }
     }
 
-    let task = Task {
-        var caught: Error? = nil
-        do {
-            var prev = ""
-            var cumulative = ""
-            for try await partial in s.session.streamResponse(to: p) {
-                if Task.isCancelled { break }
-                let cum = partial.content
-                var chunk: String? = nil
-                if cum.hasPrefix(prev) && cum.count > prev.count {
-                    chunk = String(cum.dropFirst(prev.count))
-                    prev = cum
-                } else if cum != prev {
-                    chunk = cum
-                    prev = cum
-                }
-                if let c = chunk {
-                    cumulative += c
-                    stream.enqueue(c)
-                    if !stops.isEmpty {
-                        for stop in stops {
-                            if cumulative.contains(stop) {
-                                stream.cancel()
-                                return
-                            }
-                        }
+    private func forward(_ response: LanguageModelSession.ResponseStream<String>, stops: [String]) async throws {
+        var previous = ""
+        for try await snapshot in response {
+            let text = snapshot.content
+            let added = text.utf8.starts(with: previous.utf8)
+                ? String(decoding: text.utf8.dropFirst(previous.utf8.count), as: UTF8.self)
+                : text
+            previous = text
+            let cancelled = state.withLock { state in
+                if !state.cancelled {
+                    if !added.isEmpty {
+                        state.chunks.append(added)
                     }
+                    state.cancelled = stops.contains(where: text.contains)
                 }
+                return state.cancelled
             }
-        } catch {
-            caught = error
-        }
-        stream.finish(caught)
-    }
-    stream.task = task
-
-    return Unmanaged.passRetained(stream).toOpaque()
-}
-
-// Returns the next chunk as a strdup'd CString, or NULL when the stream
-// has finished. Errors are surfaced via error_out (also indicates done).
-@c
-public func fmm_stream_next(
-    _ ptr: UnsafeMutableRawPointer,
-    _ error_out: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>
-) -> UnsafeMutablePointer<CChar>? {
-    error_out.pointee = nil
-    let stream = Unmanaged<FMMStream>.fromOpaque(ptr).takeUnretainedValue()
-
-    while true {
-        let (chunk, isDone, caught) = stream.dequeue()
-        if let c = chunk {
-            return strdup(c)
-        }
-        if isDone {
-            if let e = caught {
-                error_out.pointee = strdup("\(e)")
+            changed.signal()
+            if cancelled {
+                withUnsafeCurrentTask { $0?.cancel() }
             }
-            return nil
         }
-        stream.signal.wait()
     }
-}
 
-@c
-public func fmm_stream_free(_ ptr: UnsafeMutableRawPointer) {
-    Unmanaged<FMMStream>.fromOpaque(ptr).release()
-}
+    /// Blocks until the next chunk is available or the response stream has ended.
+    ///
+    /// - Returns: The next chunk, or `nil` once the response stream has ended.
+    /// - Throws: The error the response stream threw, other than cancellation.
+    func next() throws -> String? {
+        while true {
+            let (chunk, finished, error) = state.withLock { state in
+                (state.chunks.isEmpty ? nil : state.chunks.removeFirst(), state.finished, state.error)
+            }
+            if let chunk {
+                return chunk
+            }
+            if finished {
+                if let error {
+                    throw error
+                }
+                return nil
+            }
+            changed.wait()
+        }
+    }
 
-@c
-public func fmm_stream_cancel(_ ptr: UnsafeMutableRawPointer) {
-    let stream = Unmanaged<FMMStream>.fromOpaque(ptr).takeUnretainedValue()
-    stream.cancel()
-}
-
-@c
-public func fmm_stream_wait_for_task(_ ptr: UnsafeMutableRawPointer) {
-    let stream = Unmanaged<FMMStream>.fromOpaque(ptr).takeUnretainedValue()
-    stream.waitForTask()
+    /// Cancels generation and drops every chunk not yet returned by ``next()``.
+    ///
+    /// Safe to call from any thread. A blocked ``next()`` keeps waiting until the response stream has ended.
+    func cancel() {
+        let task = state.withLock { state in
+            state.cancelled = true
+            state.chunks.removeAll()
+            return state.task
+        }
+        task?.cancel()
+        changed.signal()
+    }
 }

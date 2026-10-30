@@ -12,15 +12,20 @@ module AppleFoundationModel
 
     def respond(to:)
       raise Error, "session is closed" if @closed
-      @native.respond(to)
+      response = +""
+      @native.stream(to) { |chunk| response << chunk }
+      response
     end
 
     def stream_response(to:, stop_at: nil)
       raise Error, "session is closed" if @closed
       raise ArgumentError, "block required for stream_response" unless block_given?
-      buf = String.new
-      @native.stream(to, stop_at: stop_at) { |chunk| buf << chunk; yield chunk }
-      buf
+      response = +""
+      @native.stream(to, stop_at: stop_at) do |chunk|
+        response << chunk
+        yield chunk
+      end
+      response
     end
 
     def cancel_stream

@@ -1,13 +1,20 @@
-// swift-tools-version:6.3
+// swift-tools-version: 6.4
+
 import PackageDescription
 
 let package = Package(
     name: "FoundationModelMac",
-    platforms: [.macOS("26.0")],
+    platforms: [.macOS(.v27)],
     products: [
-        .library(name: "FoundationModelMac", type: .dynamic, targets: ["FoundationModelMac"])
+        .library(
+            name: "FoundationModelMac",
+            type: .dynamic,
+            targets: ["FoundationModelMac"]
+        ),
     ],
     targets: [
-        .target(name: "FoundationModelMac", path: "Sources/FoundationModelMac")
+        .target(
+            name: "FoundationModelMac"
+        ),
     ]
 )
