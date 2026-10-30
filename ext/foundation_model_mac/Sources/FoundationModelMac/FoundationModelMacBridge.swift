@@ -1,7 +1,7 @@
 import Foundation
 import FoundationModels
 
-/// Calls ``unavailableReason()`` from C as `foundation_model_mac_unavailable_reason`.
+/// Calls `unavailableReason()` from C as `foundation_model_mac_unavailable_reason`.
 ///
 /// - Returns: `NULL` when the system language model is available, otherwise a newly allocated NUL-terminated UTF-8
 ///   string owned by the caller. Release it with ``cFree(_:)``.
@@ -29,7 +29,7 @@ public func cSessionFree(_ session: UnsafeMutableRawPointer) {
     Unmanaged<LanguageModelSession>.fromOpaque(session).release()
 }
 
-/// Starts a ``ChunkStream`` from C as `foundation_model_mac_stream_start`.
+/// Starts a `ChunkStream` from C as `foundation_model_mac_stream_start`.
 ///
 /// - Parameters:
 ///   - session: An opaque session from ``cSessionNew(_:)``.
@@ -52,7 +52,7 @@ public func cStreamStart(
     return Unmanaged.passRetained(stream).toOpaque()
 }
 
-/// Calls ``ChunkStream/next()`` from C as `foundation_model_mac_stream_next`.
+/// Calls `ChunkStream.next()` from C as `foundation_model_mac_stream_next`.
 ///
 /// - Parameters:
 ///   - stream: An opaque stream from ``cStreamStart(_:_:_:_:)``.
@@ -74,7 +74,7 @@ public func cStreamNext(
     }
 }
 
-/// Calls ``ChunkStream/cancel()`` from C as `foundation_model_mac_stream_cancel`, from any thread.
+/// Calls `ChunkStream.cancel()` from C as `foundation_model_mac_stream_cancel`, from any thread.
 ///
 /// - Parameter stream: An opaque stream from ``cStreamStart(_:_:_:_:)``.
 @c(foundation_model_mac_stream_cancel)
